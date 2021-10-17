@@ -31,12 +31,35 @@ The code has been tested to work with below tool versions
   * ~~`npm install -g @imc-trading/svlangserver`~~
     ```bash
     # pull the latest version which has not been pushed to npm registry
-    git clone git@github.com:imc-trading/svlangserver.git
+    git clone git@github.com:raytroop/svlangserver.git
     cd svlangserver
     npm pack
     npm install -g imc-trading-svlangserver-0.3.4.tgz
     ```
   * Update .vim/coc-settings.json
+    ```json
+    {
+    "languageserver": {
+        "svlangserver": {
+            "module": "/PATH/TO/NODE/bin/svlangserver",
+            "filetypes": ["verilog_systemverilog"],
+            "settings": {
+                "trace.server": "verbose",
+                "systemverilog.includeIndexing": ["**/*.{v,sv,svh}"],
+                "systemverilog.excludeIndexing": [],
+                "systemverilog.defines" : [],
+                "systemverilog.launchConfiguration": "/TOOL/PATH/verilator -sv -Wall --lint-only",
+                "systemverilog.formatCommand": "/TOOL/PATH/verible-verilog-format",
+                "systemverilog.disableCompletionProvider": false,
+                "systemverilog.disableHoverProvider": false,
+                "systemverilog.disableSignatureHelpProvider": false,
+                "systemverilog.disableLinting": true
+
+              }
+          }
+      }
+  }
+    ```
 - For VSCode
   * Install the extension from the marketplace.
   * Update the settings
