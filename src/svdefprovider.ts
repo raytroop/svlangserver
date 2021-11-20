@@ -97,7 +97,35 @@ export class SystemVerilogDefinitionProvider {
         return [undefined, undefined];
     }
 
-    private _getDefinition(document: TextDocument, position: Position, includeUserDefines?: Boolean): [string, SystemVerilogSymbol|number] {
+    private _getIncludeFileName(tokens: GrammarToken[], tokenNum: number): string {
+        let startTokenNum: number;
+        for (let i: number = tokenNum; i >= 0; i--) {
+            let scope: string = tokens[i].scopes[tokens[i].scopes.length - 1];
+            if (scope == "string.begin.systemverilog") {
+                startTokenNum = i;
+                break;
+            }
+        }
+        if (startTokenNum === undefined) {
+            return undefined;
+        }
+
+        let endTokenNum: number;
+        for (let i: number = tokenNum; i < tokens.length; i++) {
+            let scope: string = tokens[i].scopes[tokens[i].scopes.length - 1];
+            if (scope == "string.end.systemverilog") {
+                endTokenNum = i;
+                break;
+            }
+        }
+        if (endTokenNum === undefined) {
+            return undefined;
+        }
+
+        return tokens.slice(startTokenNum + 1, endTokenNum).map(t => t.text).join('');
+    }
+
+    private _getDefinition(document: TextDocument, position: Position, includeUserDefines?: Boolean, checkPrevPosition: Boolean = false): [string, SystemVerilogSymbol|number] {
         let svtokens: GrammarToken[] = this._indexer.getSystemVerilogCompletionTokens(document.uri);
         let extTokenNums: number[] = this._indexer.getSystemVerilogCompletionTokenNumber(document, position.line, position.character + 1);
         let tokenNum: number = extTokenNums[1];
@@ -106,6 +134,7 @@ export class SystemVerilogDefinitionProvider {
         }
 
         let scope: string = svtokens[tokenNum].scopes[svtokens[tokenNum].scopes.length - 1];
+        let parentScope: string = svtokens[tokenNum].scopes.length > 1 ? svtokens[tokenNum].scopes[svtokens[tokenNum].scopes.length - 2] : undefined;
         if (scope.startsWith("macro.")) {
             let defText: string = svtokens[tokenNum].text.slice(1).replace(/\s*\($/, "");
             let result: [string, SystemVerilogSymbol[]][] = this._indexer.getMacros(document.uri, defText);
@@ -132,7 +161,17 @@ export class SystemVerilogDefinitionProvider {
                 return [filePath, symbol];
             }
         }
+        else if (parentScope == "string.body.systemverilog") {
+            let incFileName: string = this._getIncludeFileName(svtokens, tokenNum);
+            if (incFileName == undefined) {
+                return [undefined, undefined];
+            }
+            return this._indexer.getIncFilePathAndSymbol(incFileName);
+        }
         else if (!scope.startsWith("identifier.")) {
+            if (checkPrevPosition && (position.character > 0)) {
+                return this._getDefinition(document, Position.create(position.line, position.character - 1), includeUserDefines, false);
+            }
             return [undefined, undefined];
         }
 
@@ -140,13 +179,27 @@ export class SystemVerilogDefinitionProvider {
         let isRoutine: Boolean;
         [containerName, isRoutine] = this._findNamedArg(tokenNum, svtokens);
         if ((containerName == undefined) || (isRoutine == undefined)) {
+            let symText: string = svtokens[tokenNum].text;
+            if (scope.startsWith("identifier.scoped.")) {
+                let endPos: number = document.offsetAt(position) - svtokens[tokenNum].index;
+                endPos = svtokens[tokenNum].text.indexOf("::", endPos > 0 ? endPos - 1 : 0);
+                endPos = endPos < 0 ? svtokens[tokenNum].text.length : endPos;
+                symText = svtokens[tokenNum].text.slice(0, endPos);
+                symText = symText.replace(/::\*$/, '');
+                if (symText == "*") {
+                    return [undefined, undefined];
+                }
+                else if (symText.indexOf("::") < 0) {
+                    return this._indexer.getPackageSymbol(symText);
+                }
+            }
             let filePath: string;
             let symbol: SystemVerilogSymbol;
-            [filePath, symbol] = this._indexer.findSymbol(document.uri, svtokens[tokenNum].text);
+            [filePath, symbol] = this._indexer.findSymbol(document.uri, symText);
             if ((filePath == undefined) || (symbol == undefined)) {
                 symbol = this._indexer.getContainerSymbol(svtokens[tokenNum].text);
                 if (symbol == undefined) {
-                    return [undefined, undefined];
+                    return this._indexer.getPackageSymbol(svtokens[tokenNum].text);
                 }
 
                 filePath = this._indexer.getInstFilePath(svtokens[tokenNum].text);
@@ -195,7 +248,7 @@ export class SystemVerilogDefinitionProvider {
 
     public getDefinitionSymbolLocation(document: TextDocument, position: Position): Promise<Location[]> {
         try {
-            let symbolInfo: [string, SystemVerilogSymbol|number] = this._getDefinition(document, position, false);
+            let symbolInfo: [string, SystemVerilogSymbol|number] = this._getDefinition(document, position, false, true);
             if (symbolInfo[0] == undefined) {
                 return Promise.resolve([]);
             }
@@ -220,6 +273,9 @@ export class SystemVerilogDefinitionProvider {
 
             if (symbolInfo[0] == "") {
                 return this._indexer.getUserDefine(<number>(symbolInfo[1]));
+            }
+            else if ((typeof symbolInfo[1] !== 'number') && ((<SystemVerilogSymbol>(symbolInfo[1])).type.indexOf("includefile") >= 0)) {
+                return (<SystemVerilogSymbol>(symbolInfo[1])).name;
             }
 
             return (<SystemVerilogSymbol>(symbolInfo[1])).getDefinition(symbolInfo[0]);
