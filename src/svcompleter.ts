@@ -274,7 +274,7 @@ const sv_completion_systemtask: string[][] = [
     ["width", "$width(controlled_reference_event, timing_check_limit, threshold, notifier);", "width(${1:controlled_reference_event}, ${2:timing_check_limit}, ${3:threshold}${4:, ${5:notifier}});"],
     ["nochange", "$nochange(reference_event, data_event, start_edge_offset, end_edge_offset, notifier);", "nochange(${1:reference_event}, ${2:data_event}, ${3:start_edge_offset}, ${4:end_edge_offset}${5:, ${6:notifier}});"],
     // Loading timing data from an SDF file
-    ["sdf_annotate", "$sdf_annotate(sdf_file, module_instance, config_file, log_file, mtm_spec, scale_factors, scale_type);", "|});"],
+    ["sdf_annotate", "$sdf_annotate(sdf_file, module_instance, config_file, log_file, mtm_spec, scale_factors, scale_type);", "sdf_annotate(${1:sdf_file}, ${2:module_instance}, ${3:config_file}, ${4:log_file}, ${5:mtm_spec}, ${6:scale_factors}, ${7:scale_type});"],
     // Optional system tasks and system functions
     ["countdrivers", "$countdrivers(net, net_is_forced, number_of_01x_drivers, number_of_0_drivers, number_of_1_drivers, number_of_x_drivers);", "countdrivers(${1:net}${2:, ${3:net_is_forced}, ${4:number_of_01x_drivers}, ${5:number_of_0_drivers}, ${6:number_of_1_drivers}, ${7:number_of_x_drivers}});"],
     ["getpattern", "$getpattern(mem_element);", "getpattern(${1:mem_element});"],
