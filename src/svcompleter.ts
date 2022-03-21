@@ -815,6 +815,7 @@ const sv_completion_keywords: string[][] = [
     ["get_full_name"],
     ["get_global_pool"],
     ["get_is_active"],
+    ["is_active"],
     ["get_name"],
     ["get_next_child"],
     ["get_next_item"],
