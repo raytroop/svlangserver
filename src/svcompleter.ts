@@ -362,8 +362,36 @@ const sv_completion_tick: string[][] = [
     ["uvm_error_context", "`uvm_error_context", "uvm_error_context"],
     ["uvm_fatal", "`uvm_fatal", "uvm_fatal"],
     ["uvm_fatal_context", "`uvm_fatal_context", "uvm_fatal_context"],
-    ["uvm_field_enum", "`uvm_field_enum", "uvm_field_enum"],
+	// Non-array types macros
     ["uvm_field_int", "`uvm_field_int", "uvm_field_int"],
+    ["uvm_field_object", "`uvm_field_object", "uvm_field_object"],
+    ["uvm_field_string", "`uvm_field_string", "uvm_field_string"],
+    ["uvm_field_event", "`uvm_field_event", "uvm_field_event"],
+    ["uvm_field_real", "`uvm_field_real", "uvm_field_real"],
+    ["uvm_field_enum", "`uvm_field_enum", "uvm_field_enum"],
+	// unpacked 1-D dynamic arrays
+    ["uvm_field_array_int", "`uvm_field_array_int", "uvm_field_array_int"],
+    ["uvm_field_array_object", "`uvm_field_array_object", "uvm_field_array_object"],
+    ["uvm_field_array_string", "`uvm_field_array_string", "uvm_field_array_string"],
+    ["uvm_field_array_enum", "`uvm_field_array_enum", "uvm_field_array_enum"],
+	// unpacked 1-D static arrays
+    ["uvm_field_sarray_int", "`uvm_field_sarray_int", "uvm_field_sarray_int"],
+    ["uvm_field_sarray_object", "`uvm_field_sarray_object", "uvm_field_sarray_object"],
+    ["uvm_field_sarray_string", "`uvm_field_sarray_string", "uvm_field_sarray_string"],
+    ["uvm_field_sarray_enum", "`uvm_field_sarray_enum", "uvm_field_sarray_enum"],
+	// queues
+    ["uvm_field_queue_int", "`uvm_field_queue_int", "uvm_field_queue_int"],
+    ["uvm_field_queue_object", "`uvm_field_queue_object", "uvm_field_queue_object"],
+    ["uvm_field_queue_string", "`uvm_field_queue_string", "uvm_field_queue_string"],
+    ["uvm_field_queue_enum", "`uvm_field_queue_enum", "uvm_field_queue_enum"],
+	// associative arrays
+    ["uvm_field_aa_int_int", "`uvm_field_aa_int_int", "uvm_field_aa_int_int"],
+    ["uvm_field_aa_int_object", "`uvm_field_aa_int_object", "uvm_field_aa_int_object"],
+    ["uvm_field_aa_int_string", "`uvm_field_aa_int_string", "uvm_field_aa_int_string"],
+    ["uvm_field_aa_string_int", "`uvm_field_aa_string_int", "uvm_field_aa_string_int"],
+    ["uvm_field_aa_string_object", "`uvm_field_aa_string_object", "uvm_field_aa_string_object"],
+    ["uvm_field_aa_string_string", "`uvm_field_aa_string_string", "uvm_field_aa_string_string"],
+	//
     ["uvm_info", "`uvm_info", "uvm_info"],
     ["uvm_info_begin", "`uvm_info_begin", "uvm_info_begin"],
     ["uvm_info_context", "`uvm_info_context", "uvm_info_context"],
