@@ -945,7 +945,17 @@ const sv_completion_keywords: string[][] = [
     ["uvm_cmdline_proc"],
     ["uvm_cmdline_processor"],
     ["uvm_component_registry"],
+	//uvm configuration database
+	// typedef uvm_config_db#(uvm_bitstream_t) uvm_config_int;
+	// typedef uvm_config_db#(string) uvm_config_string;
+	// typedef uvm_config_db#(uvm_object) uvm_config_object;
+	// typedef uvm_config_db#(uvm_object_wrapper) uvm_config_wrapper;
     ["uvm_config_db"],
+	["uvm_config_int"],
+	["uvm_config_string"],
+	["uvm_config_object"],
+	["uvm_config_wrapper"],
+	//
     ["uvm_default_line_printer"],
     ["uvm_default_printer"],
     ["uvm_default_table_printer"],
