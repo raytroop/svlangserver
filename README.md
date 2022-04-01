@@ -37,7 +37,7 @@ The code has been tested to work with below tool versions
     cd svlangserver
     npm install
     npm pack
-    npm install -g imc-trading-svlangserver-0.3.5.tgz
+    npm install -g imc-trading-svlangserver-0.x.x.tgz
     ```
   * Update .vim/coc-settings.json
     ```json
