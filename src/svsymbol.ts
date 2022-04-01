@@ -5,7 +5,7 @@ import {
     SymbolInformation,
     SymbolKind,
     TextDocument
-} from "vscode-languageserver";
+} from "vscode-languageserver/node";
 
 import {
     ConnectionLogger,
@@ -246,6 +246,13 @@ export class SystemVerilogSymbol {
             ConnectionLogger.error(error);
             return [];
         }
+    }
+
+    public getSymbolDocumentPath(uri: string): string {
+        if (Array.isArray(this.defLocations) && (typeof this.defLocations[0] === "string")) {
+            return this.defLocations[0];
+        }
+        return uri;
     }
 }
 

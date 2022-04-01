@@ -12,14 +12,21 @@ import {
     Location,
     MarkupKind,
     ProposedFeatures,
-    Range,
     SignatureHelp,
     SymbolInformation,
     TextDocuments,
     TextDocumentPositionParams,
     TextDocumentSyncKind,
     WorkspaceSymbolParams
-} from 'vscode-languageserver';
+} from 'vscode-languageserver/node';
+
+import {
+    ApplyWorkspaceEditParams
+} from 'vscode-languageserver-protocol/node';
+
+import {
+    TextDocumentEdit,
+} from 'vscode-languageserver-types';
 
 import {
     TextDocument
@@ -50,8 +57,11 @@ import {
 } from './svformatter';
 
 import {
+    SystemVerilogHierarchyCalculator
+} from './svhier';
+
+import {
     ConnectionLogger,
-    fsReadFile,
     isStringListEqual,
     uriToPath
 } from './genutils';
@@ -61,6 +71,7 @@ import {
 } from './svutils';
 
 const BuildIndexCommand = "systemverilog.build_index"
+const ReportHierarchyCommand = "systemverilog.report_hierarchy"
 
 // Create a connection for the server, using Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -70,6 +81,7 @@ ConnectionLogger.setConnection(connection);
 // client capabilities
 let clientName: string;
 let hasConfigurationCapability: Boolean = false;
+let hasShowWindowCapability: Boolean = false;
 
 // Create a simple text document manager.
 let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -79,10 +91,12 @@ let diagnostics: VerilogDiagnostics = new VerilogDiagnostics(svindexer);
 let svcompleter: SystemVerilogCompleter = new SystemVerilogCompleter(svindexer);
 let svsignhelper: SystemVerilogSignatureHelpProvider = new SystemVerilogSignatureHelpProvider(svindexer);
 let svformatter: SystemVerilogFormatter = new SystemVerilogFormatter();
+let svhiercalculator: SystemVerilogHierarchyCalculator = new SystemVerilogHierarchyCalculator(svindexer);
 let settings = default_settings;
 
 connection.onInitialize((params: InitializeParams) => {
     hasConfigurationCapability = !!(params.capabilities.workspace && !!params.capabilities.workspace.configuration);
+    hasShowWindowCapability = !!(params.capabilities.window && params.capabilities.window.showDocument);
     clientName = !!params.clientInfo ? params.clientInfo.name : undefined;
 
     try {
@@ -125,6 +139,7 @@ connection.onInitialize((params: InitializeParams) => {
             executeCommandProvider: {
                 commands: [
                     BuildIndexCommand,
+                    ReportHierarchyCommand,
                 ]
             },
             documentFormattingProvider: true,
@@ -297,15 +312,15 @@ connection.onHover((hoverParams: HoverParams): Promise<Hover> => {
             return Promise.resolve(undefined);
         }
 
-        let defText: string = svdefprovider.getDefinitionText(documents.get(hoverParams.textDocument.uri), hoverParams.position);
-        if (defText == undefined) {
+        let defText: [string, string[]] = svdefprovider.getDefinitionText(documents.get(hoverParams.textDocument.uri), hoverParams.position);
+        if ((defText[0] == undefined) || (defText[1] == undefined)) {
             return Promise.resolve(undefined);
         }
 
         return Promise.resolve({
             contents: {
                 kind: MarkupKind.Markdown,
-                value: ["```"].concat(defText.split(/\r?\n/).map(s => s.trim())).concat(["```"]).join('\n'),
+                value: (defText[0].length > 0 ? [`*${defText[0]}*`] : []).concat([(clientName == "coc.nvim") ? "```systemverilog" : "```"]).concat(defText[1]).concat(["```"]).join('\n'),
             },
         });
     } catch (error) {
@@ -364,8 +379,31 @@ connection.onExecuteCommand((commandParams) => {
             svindexer.setLibraries(settings.get("systemverilog.libraryIndexing"), settings.get("systemverilog.excludeIndexing"));
             svindexer.index(settings.get("systemverilog.includeIndexing"), settings.get("systemverilog.excludeIndexing"));
         }
+        else if (commandParams.command == ReportHierarchyCommand) {
+            if ((commandParams.arguments == undefined) || (commandParams.arguments.length != 1)) {
+                ConnectionLogger.error(`${ReportHierarchyCommand} needs the module/interface name as an argument`);
+                return;
+            }
+
+            const fileUri: string = svhiercalculator.calcHier(commandParams.arguments[0]);
+            ConnectionLogger.log(`Hierarchy for ${commandParams.arguments[0]} available at ${fileUri}`);
+            if (hasShowWindowCapability) {
+                connection.sendRequest("window/showDocument", {uri: fileUri, takeFocus: true});
+            }
+            else {
+                const editParams: ApplyWorkspaceEditParams = {
+                    label: "Hierarchy",
+                    edit: {
+                        documentChanges: [
+                            TextDocumentEdit.create({uri: fileUri, version: null}, []),
+                        ]
+                    }
+                };
+                connection.sendRequest("workspace/applyEdit", editParams);
+            }
+        }
         else {
-            throw new Error(`Unhandled command ${commandParams.command}`);
+            ConnectionLogger.error(`Unhandled command ${commandParams.command}`);
         }
     } catch (error) {
         ConnectionLogger.error(error);

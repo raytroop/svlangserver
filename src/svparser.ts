@@ -1,8 +1,7 @@
-import { TextDocument, Location, Range, Position } from "vscode-languageserver";
+import { TextDocument, Range, Position } from "vscode-languageserver/node";
 
 import {
     ConnectionLogger,
-    pathToUri,
     uriToPath
 } from './genutils';
 
@@ -24,7 +23,6 @@ import {
 import {
     MacroInfo,
     PreprocIncInfo,
-    PreprocIncInfoJSON,
     PreprocInfo,
     SystemVerilogPreprocessor
 } from "./svpreprocessor";
@@ -92,7 +90,7 @@ function _jsonToContainerSymbolsInfo(file: string, jsonContainerSymbolsInfo: Sys
         else {
             for (let jsonContainerInfo of jsonContainerSymbolsInfo[SystemVerilogParser.ContainerInfoIndex.Containers]) {
                 (<SystemVerilogParser.SystemVerilogContainersInfo>(containerSymbolsInfo[SystemVerilogParser.ContainerInfoIndex.Containers])).push([
-                    SystemVerilogSymbol.fromJSON(file, <SystemVerilogSymbolJSON>(jsonContainerInfo[0])),
+                    [SystemVerilogSymbol.fromJSON(file, <SystemVerilogSymbolJSON>(jsonContainerInfo[0][0])), undefined],
                     _jsonToContainerSymbolsInfo(file, <SystemVerilogParser.SystemVerilogContainerSymbolsInfoJSON[]>(jsonContainerInfo[1]))
                 ]);
             }
@@ -145,12 +143,12 @@ class ContainerStack {
         let resSymbol: SystemVerilogSymbol;
         if (this._symbolMap.has(symbolStr)) {
             containerInfo = containerSymbols[this._symbolMap.get(symbolStr)];
-            containerInfo[0].overwrite(symbol);
-            resSymbol = containerInfo[0];
+            containerInfo[0][0].overwrite(symbol);
+            resSymbol = containerInfo[0][0];
         }
         else {
             this._symbolMap.set(symbolStr, containerSymbols.length);
-            containerInfo = [symbol, []];
+            containerInfo = [[symbol, undefined], []];
             containerSymbols.push(containerInfo);
             resSymbol = symbol;
         }
@@ -192,16 +190,24 @@ class ContainerStack {
         return resSymbol;
     }
 
-    pop() {
+    getContainerDocumentPath(uri: string): string {
+        if (this._stack[1].length <= 0) {
+            return undefined;
+        }
+        return this._stack[1][this._stack[1].length - 1][0][0].getSymbolDocumentPath(uri);
+    }
+
+    pop(endPosition?: SystemVerilogParser.SystemVerilogPosition) {
         if (this._stack[1].length <= 0) {
             ConnectionLogger.error(`ContainerStack is already empty!`);
             return;
         }
+        this._stack[1][this._stack[1].length - 1][0][1] = endPosition;
         this._stack[1].pop();
     }
 
     toStringList(): string[] {
-        return this._stack[1].map(e => e[0].name);
+        return this._stack[1].map(e => e[0][0].name);
     }
 
     pushImportItem(importItemToken: ParseToken) {
@@ -308,7 +314,6 @@ export class SystemVerilogParser {
     private _fileSymbolsInfo: SystemVerilogParser.SystemVerilogFileSymbolsInfo[];
     private _svtokens: ParseToken[];
     private _tokenOrder: [string, number][];
-    private _symbols: SystemVerilogSymbol[];
     private _containerStack: ContainerStack;
     private _currTokenNum: number;
 
@@ -330,7 +335,7 @@ export class SystemVerilogParser {
         }
         else if (symIndex == SystemVerilogParser.ContainerInfoIndex.Containers) {
             for (let childContainerInfo of <SystemVerilogParser.SystemVerilogContainersInfo>(containerInfo[SystemVerilogParser.ContainerInfoIndex.Containers])) {
-                let symbol: SystemVerilogSymbol = childContainerInfo[0];
+                let symbol: SystemVerilogSymbol = childContainerInfo[0][0];
                 ConnectionLogger.log(`DEBUG: container symbol "${symbol.name}" of type ${symbol.type}`);
                 let containerSymbolsInfo: SystemVerilogParser.SystemVerilogContainerSymbolsInfo[] = childContainerInfo[1];
                 for (let si: number = 0; si < containerSymbolsInfo.length; si++) {
@@ -355,7 +360,7 @@ export class SystemVerilogParser {
                 return;
             }
             for (let containerInfo of <SystemVerilogParser.SystemVerilogContainersInfo>(this._fileSymbolsInfo[SystemVerilogParser.FileInfoIndex.Containers])) {
-                let symbol: SystemVerilogSymbol = containerInfo[0];
+                let symbol: SystemVerilogSymbol = containerInfo[0][0];
                 ConnectionLogger.log(`DEBUG: container symbol "${symbol.name}" of type ${symbol.type}`);
                 let containerSymbolsInfo: SystemVerilogParser.SystemVerilogContainerSymbolsInfo[] = containerInfo[1];
                 for (let si: number = 0; si < containerSymbolsInfo.length; si++) {
@@ -410,7 +415,7 @@ export class SystemVerilogParser {
         }
     }
 
-    public tokenize(text: string, includeFilePaths: string[], userDefinesMacroInfo: Map<string, MacroInfo>): [ParseToken[], [string, number][], SystemVerilogSymbol[]] {
+    public tokenize(_text: string, includeFilePaths: string[], userDefinesMacroInfo: Map<string, MacroInfo>): [ParseToken[], [string, number][], SystemVerilogSymbol[]] {
         try {
             let preprocParser: SystemVerilogPreprocessor = new SystemVerilogPreprocessor();
             let preprocInfo: PreprocInfo = preprocParser.parse(this._document, includeFilePaths, this._includeCache, userDefinesMacroInfo);
@@ -478,6 +483,29 @@ export class SystemVerilogParser {
             }
         }
         return tokenOrderIndex;
+    }
+
+    private _getEndPosition(token?: number): SystemVerilogParser.SystemVerilogPosition {
+        let _token: number = token == undefined ? this._currTokenNum : token;
+        let tokenOrderIndex: number = this._getTokenOrderIndex(_token);
+        if (tokenOrderIndex == undefined) {
+            ConnectionLogger.error(`Could not figure out the source file for the given token. Falling back to default`);
+            let endPos: Position = this._document.positionAt(this._svtokens[_token].endTokenIndex);
+            return [endPos.line, endPos.character];
+        }
+
+        let document: TextDocument = this._getDocumentFromTokenOrderIndex(tokenOrderIndex);
+        if (document == undefined) {
+            ConnectionLogger.error(`Could not figure out the source file for the given token. Falling back to default`);
+            let endPos: Position = this._document.positionAt(this._svtokens[_token].endTokenIndex);
+            return [endPos.line, endPos.character];
+        }
+
+        let refDocumentPath: string = this._containerStack.getContainerDocumentPath(document.uri);
+        let endPos: Position = (this._document.uri == refDocumentPath)
+                             ? this._document.positionAt(this._svtokens[_token].endTokenIndex)
+                             : document.positionAt(this._svtokens[_token].endTokenIndex);
+        return (this._document.uri == refDocumentPath) ? [endPos.line, endPos.character] : [refDocumentPath, [endPos.line, endPos.character]];
     }
 
     private _getDefLocations(startToken: number, endToken: number): DefinitionLocations {
@@ -852,6 +880,7 @@ export class SystemVerilogParser {
 
             let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes, scopeDepth + 1);
             if ((scope == "operator.open_parantheses.systemverilog") || (scope == "operator.semicolon.systemverilog")) {
+                //ConnectionLogger.log(`DEBUG: Processing routine ${this._svtokens[prevIdToken].text}`);
                 routineSymbol = this._pushContainerSymbol(prevIdToken, [this._svtokens[routineTypeToken].text]);
 
                 if (scope == "operator.open_parantheses.systemverilog") {
@@ -928,6 +957,209 @@ export class SystemVerilogParser {
         return true;
     }
 
+    private _processDimension(): Boolean {
+        let _currTokenNum: number = this._currTokenNum;
+        let scopeDepth: number = this._svtokens[this._currTokenNum].scopes.length - 1;
+
+        this._currTokenNum++;
+        for (; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
+            let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes, scopeDepth);
+            if (scope == undefined) {
+                this._currTokenNum = _currTokenNum;
+                return false;
+            }
+            else if (scope != "dimension.expression.systemverilog") {
+                this._currTokenNum--;
+                break;
+            }
+        }
+        if (this._currTokenNum == this._svtokens.length) {
+            this._currTokenNum--;
+        }
+
+        return true;
+    }
+
+    private _processParamPortDeclaration(): Boolean {
+        let _currTokenNum: number = this._currTokenNum;
+        let scopeDepth: number = this._svtokens[this._currTokenNum].scopes.length - 1;
+
+        this._currTokenNum++;
+        let nextToken: number = this._nextNonIgnorableScope();
+        if ((nextToken == undefined) || (this._getElem(this._svtokens[nextToken].scopes, scopeDepth) != "parantheses.begin.systemverilog")) {
+            this._currTokenNum = _currTokenNum;
+            return false;
+        }
+
+        this._currTokenNum++;
+        for (; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
+            let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes, scopeDepth);
+            if (scope == undefined) {
+                this._currTokenNum = _currTokenNum;
+                return false;
+            }
+            else if (scope != "parantheses.block.systemverilog") {
+                this._currTokenNum--;
+                break;
+            }
+        }
+        if (this._currTokenNum == this._svtokens.length) {
+            this._currTokenNum--;
+        }
+
+        return true;
+    }
+/*
+= ["const"] ["var"] ["static"|"automatic"] integer_vector_type ["signed"|"unsigned"] {packed_dimension} {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] integer_atom_type ["signed"|unsigned"] {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] non_integer_type {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] struct_union ["packed"] ["signed"|"unsigned"] "{" struct_union_member {"," struct_union_member} "}" {packed_dimension} {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] "string"|"chandle" {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] "virtual" ["interface"] interface_identifier [parameter_value_assignment] ["." modport_identifier] {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] [class_scope|package_scope] type_identifier {packed_dimension} {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] ps_class_identifier [parameter_value_assignment] {"::" class_identifier [parameter_value_asisgnment]} {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] "event" {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] ps_covergroup_identifier {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] "type" "("...")" {list_of_variable_decl_assignments} ";"
+| ["const"] ["var"] ["static"|"automatic"] ["signed"|"unsigned"] {packed_dimension} {list_of_variable_decl_assignments} ";"
+| "typedef" ...
+| "nettype" ...
+*/
+    private _processRoutineVarDeclaration() {
+        let _currTokenNum = this._currTokenNum;
+        let scopeDepth: number = this._svtokens[this._currTokenNum].scopes.length - 1;
+
+        this._printDebugInfo("var declaration");
+        let startToken: number;
+        let prevToken: number;
+        let prevIdToken: number;
+        let anonTypeName: string;
+        let dataTypeToken: number;
+        let waitForEnd: Boolean = false;
+        let symbolPushed: Boolean = false;
+        for (; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
+            let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes, scopeDepth);
+            if (scope == undefined) {
+                this._currTokenNum = _currTokenNum;
+                return false;
+            }
+
+            if (this._notIgnorableScope()) {
+                if (this._processPreprocessor() ||
+                    this._processAttributeInstance()) {
+                    continue;
+                }
+
+                if (startToken == undefined) {
+                    startToken = this._currTokenNum;
+                    if (["assign", "unique", "unique0", "priority", "case", "casex", "casez", "if", "void", "disable",
+                         "forever", "repeat", "while", "for", "do", "foreach", "return", "break", "continue", "fork",
+                         "begin", "wait", "wait_order", "assert", "assume", "cover", "restrict", "randcase", "randsequence",
+                         "expect"].indexOf(this._svtokens[startToken].text) >= 0) {
+                        this._currTokenNum = _currTokenNum;
+                        return false;
+                    }
+                }
+
+                if ((scope == "operator.comma.systemverilog") ||
+                    (scope == "operator.semicolon.systemverilog")) {
+                    waitForEnd = false;
+                    if ((prevIdToken != undefined) && (startToken != undefined)) {
+                        if (prevIdToken == startToken) {
+                            this._currTokenNum = _currTokenNum;
+                            return false;
+                        }
+                        let types: string[] = ["variable", anonTypeName || (dataTypeToken == undefined ? this._svtokens[startToken].text : this._svtokens[dataTypeToken].text)];
+                        this._pushSymbol(prevIdToken, types, [startToken, prevToken]); //TBD range
+                        symbolPushed = true;
+                    }
+                    else {
+                        this._currTokenNum = _currTokenNum;
+                        return false;
+                    }
+
+                    prevToken = undefined;
+                    if (scope == "operator.semicolon.systemverilog") {
+                        break;
+                    }
+                }
+                else if (!waitForEnd) {
+                    if (scope == "operator.equals.systemverilog") {
+                        waitForEnd = true;
+                    }
+                    else if (scope == "keyword.struct_union.systemverilog") {
+                        anonTypeName = this._processStructUnionDeclaration();
+                    }
+                    else if (scope == "keyword.enum.systemverilog") {
+                        anonTypeName = this._processEnumDeclaration();
+                    }
+                    else if (scope.startsWith("identifier.") && (this._svtokens[this._currTokenNum].text == "type")) {
+                        anonTypeName = this._processTypeReference();
+                    }
+                    else if (scope.startsWith("identifier.")) {
+                        dataTypeToken = prevIdToken;
+                        prevIdToken = this._currTokenNum;
+                    }
+                    else if (scope == "operator.open_bracket.systemverilog") {
+                        if (!this._processDimension()) {
+                            this._currTokenNum = _currTokenNum;
+                            return false;
+                        }
+                    }
+                    else if ((scope == "operator.other.systemverilog") && (this._svtokens[this._currTokenNum].text == "#")) {
+                        if (!this._processParamPortDeclaration()) {
+                            this._currTokenNum = _currTokenNum;
+                            return false;
+                        }
+                    }
+                    else if (symbolPushed) {
+                        this._ignoreTillSemiColon();
+                        return true;
+                    }
+                    else {
+                        this._currTokenNum = _currTokenNum;
+                        return false;
+                    }
+                }
+                prevToken = this._currTokenNum;
+            }
+        }
+        if (this._currTokenNum == this._svtokens.length) {
+            this._currTokenNum--;
+        }
+
+        return true;
+    }
+
+    private _processRoutineBody() {
+        this._currTokenNum++;
+        for(; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
+            let scope:string = this._getElem(this._svtokens[this._currTokenNum].scopes);
+            if (this._notIgnorableScope()) {
+                //ConnectionLogger.log(`DEBUG: Routine body parsing at ${this._svtokens[this._currTokenNum].text}`);
+                if ((scope == "identifier.simple.systemverilog") &&
+                    ((this._svtokens[this._currTokenNum].text == "endfunction") || (this._svtokens[this._currTokenNum].text == "endtask"))) {
+                    this._containerStack.pop(this._getEndPosition());
+                    break;
+                }
+
+                if (!this._processRoutineVarDeclaration() &&
+                    !this._processParamDeclaration()) {
+                    //ConnectionLogger.log(`DEBUG: Routine ignoring statement at ${this._svtokens[this._currTokenNum].text}`);
+                    this._currTokenNum--;
+                    this._ignoreStatement();
+                    continue;
+                }
+            }
+        }
+        if (this._currTokenNum == this._svtokens.length) {
+            this._currTokenNum--;
+        }
+        else {
+            this._processEndIdentifier();
+        }
+    }
+
     private _processRoutine(): Boolean {
         let startToken: number = this._currTokenNum;
         let scopeDepth: number = this._svtokens[startToken].scopes.length - 1;
@@ -937,20 +1169,7 @@ export class SystemVerilogParser {
 
         this._printDebugInfo("routine");
         this._processRoutineHeader();
-        for(; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
-            let scope:string = this._getElem(this._svtokens[this._currTokenNum].scopes);
-            if ((scope == "identifier.simple.systemverilog") &&
-                ((this._svtokens[this._currTokenNum].text == "endfunction") || (this._svtokens[this._currTokenNum].text == "endtask"))) {
-                this._containerStack.pop();
-                break;
-            }
-        }
-        if (this._currTokenNum == this._svtokens.length) {
-            this._currTokenNum--;
-        }
-        else {
-            this._processEndIdentifier();
-        }
+        this._processRoutineBody();
 
         return true;
     }
@@ -1040,7 +1259,7 @@ export class SystemVerilogParser {
                     if (modportToken != undefined) {
                         if (scope == "operator.open_parantheses.systemverilog") {
                             this._processPortList(); //TBD handle import_export functions
-                            this._containerStack.pop();
+                            this._containerStack.pop(this._getEndPosition());
                             modportSymbol.defLocations = this._getDefLocations(modportToken, this._currTokenNum),
                             modportToken = undefined;
                         }
@@ -1059,7 +1278,7 @@ export class SystemVerilogParser {
         }
 
         if (modportToken != undefined) {
-            this._containerStack.pop();
+            this._containerStack.pop(this._getEndPosition());
             modportSymbol.defLocations = this._getDefLocations(modportToken, this._currTokenNum);
         }
 
@@ -1087,11 +1306,13 @@ export class SystemVerilogParser {
                     startToken = this._currTokenNum;
 
                     if (scope == "keyword.struct_union.systemverilog") {
-                        let anonTypeName: string = this._processStructUnionDeclaration();
+                        //let anonTypeName: string = this._processStructUnionDeclaration();
+                        this._processStructUnionDeclaration();
                         continue;
                     }
                     else if (scope == "keyword.enum.systemverilog") {
-                        let anonTypeName: string = this._processEnumDeclaration();
+                        //let anonTypeName: string = this._processEnumDeclaration();
+                        this._processEnumDeclaration();
                         continue;
                     }
                 }
@@ -1152,7 +1373,7 @@ export class SystemVerilogParser {
             this._currTokenNum--;
         }
 
-        this._containerStack.pop();
+        this._containerStack.pop(this._getEndPosition());
         structSymbol.defLocations = this._getDefLocations(structUnionTypeToken, this._currTokenNum);
 
         return structUnionName;
@@ -1621,7 +1842,10 @@ export class SystemVerilogParser {
         if (["endinterface", "endmodule", "endpackage", "endprogram"].indexOf(this._svtokens[keywordToken].text) >= 0) {
             this._currTokenNum++;
             this._processEndIdentifier();
-            this._containerStack.pop();
+            if (this._currTokenNum == this._svtokens.length) {
+                this._currTokenNum--;
+            }
+            this._containerStack.pop(this._getEndPosition());
         }
 
         return true;
@@ -2045,7 +2269,7 @@ export class SystemVerilogParser {
     }
 
     private _processGenerateBlock() {
-        let _currTokenNum = this._currTokenNum;
+        //let _currTokenNum = this._currTokenNum;
         this._currTokenNum++;
 
         let startToken: number;
@@ -2093,7 +2317,7 @@ export class SystemVerilogParser {
         else {
             this._printDebugInfo("generate statement");
             for (; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
-                let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes, scopeDepth);
+                //let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes, scopeDepth);
                 if (this._notIgnorableScope()) {
                     if (this._processPreprocessor() ||
                         this._processAttributeInstance()) {
@@ -2397,7 +2621,8 @@ export class SystemVerilogParser {
         let _currTokenNum = this._currTokenNum;
         let scopeDepth: number = this._svtokens[this._currTokenNum].scopes.length - 1;
 
-        let [isInstance, type]: [Boolean, string] = this._isInstance();
+        //let [isInstance, type]: [Boolean, string] = this._isInstance();
+        let isInstance: Boolean = this._isInstance()[0];
         if (isInstance == undefined) {
             this._currTokenNum = _currTokenNum;
             return false;
@@ -2430,6 +2655,7 @@ export class SystemVerilogParser {
 
                 if ((scope == "operator.comma.systemverilog") ||
                     (scope == "operator.semicolon.systemverilog")) {
+                    waitForEnd = false;
                     if ((prevIdToken != undefined) && (startToken != undefined)) {
                         if (prevIdToken == startToken) {
                             //unnamed instantiation
@@ -2577,7 +2803,7 @@ export class SystemVerilogParser {
     }
 
     public parse(document: TextDocument, includeFilePaths: string[], includeCache: Map<string, [string, PreprocIncInfo, TextDocument]>,
-                 userDefinesMacroInfo: Map<string, MacroInfo>, precision: string="full", maxDepth: number=-1, text?: string): [SystemVerilogParser.SystemVerilogFileSymbolsInfo[], string[]] {
+                 userDefinesMacroInfo: Map<string, MacroInfo>, _precision: string="full", _maxDepth: number=-1, text?: string): [SystemVerilogParser.SystemVerilogFileSymbolsInfo[], string[]] {
         try {
             this._document = document;
             this._documentPath = uriToPath(document.uri);
@@ -2588,12 +2814,10 @@ export class SystemVerilogParser {
             if (preprocSymbols.length > 0) {
                 _initFileSymbols(this._fileSymbolsInfo, SystemVerilogParser.FileInfoIndex.Symbols, preprocSymbols);
             }
-            this._symbols = [];
             this._containerStack = new ContainerStack(this._fileSymbolsInfo);
             this._currTokenNum = 0;
 
             for (; this._currTokenNum < this._svtokens.length; this._currTokenNum++) {
-                let scope: string = this._getElem(this._svtokens[this._currTokenNum].scopes);
                 if (this._notIgnorableScope()) {
                     this._printDebugInfo("token");
                     if (this._processPreprocessor() ||
@@ -2689,6 +2913,7 @@ export namespace SystemVerilogParser {
         Symbols
     }
 
+    export type SystemVerilogPosition = [number, number]|[string, [number, number]]
     export type SystemVerilogSymbolInfo = SystemVerilogSymbol;
     export type SystemVerilogImportInfo = [string, string[]];
     export type SystemVerilogExportInfo = [string, string[]];
@@ -2697,19 +2922,20 @@ export namespace SystemVerilogParser {
     export type SystemVerilogImportsInfo = SystemVerilogImportInfo[];
     export type SystemVerilogExportsInfo = SystemVerilogExportInfo[];
     export type SystemVerilogContainerSymbolsInfo = SystemVerilogSymbolsInfo|SystemVerilogImportsInfo|SystemVerilogContainersInfo|SystemVerilogExportsInfo;
-    export type SystemVerilogContainerInfo = [SystemVerilogSymbol, SystemVerilogContainerSymbolsInfo[]];
+    export type SystemVerilogContainerInfo = [[SystemVerilogSymbol, SystemVerilogPosition], SystemVerilogContainerSymbolsInfo[]];
     export type SystemVerilogContainersInfo = SystemVerilogContainerInfo[];
     export type SystemVerilogIncludesInfo = SystemVerilogIncludeInfo[];
     export type SystemVerilogFileSymbolsInfo = SystemVerilogContainersInfo|SystemVerilogIncludesInfo|SystemVerilogSymbolsInfo|SystemVerilogImportsInfo|SystemVerilogExportsInfo;
 
+    export type SystemVerilogPositionJSON = SystemVerilogPosition;
     export type SystemVerilogSymbolInfoJSON = SystemVerilogSymbolJSON;
     export type SystemVerilogSymbolsInfoJSON = SystemVerilogSymbolInfoJSON[];
     export type SystemVerilogContainerSymbolsInfoJSON = SystemVerilogSymbolsInfoJSON|SystemVerilogImportsInfo|SystemVerilogContainersInfoJSON|SystemVerilogExportsInfo;
-    export type SystemVerilogContainerInfoJSON = [SystemVerilogSymbolJSON, SystemVerilogContainerSymbolsInfoJSON[]];
+    export type SystemVerilogContainerInfoJSON = [[SystemVerilogSymbolJSON, SystemVerilogPositionJSON], SystemVerilogContainerSymbolsInfoJSON[]];
     export type SystemVerilogContainersInfoJSON = SystemVerilogContainerInfoJSON[];
     export type SystemVerilogFileSymbolsInfoJSON = SystemVerilogContainersInfoJSON|SystemVerilogIncludesInfo|SystemVerilogSymbolsInfoJSON|SystemVerilogImportsInfo|SystemVerilogExportsInfo;
 
-    export function fileAllSymbols(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[], strict: Boolean = true): SystemVerilogSymbol[] {
+    export function fileTopSymbols(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[], strict: Boolean = false): SystemVerilogSymbol[] {
         try {
             let symbols: SystemVerilogSymbol[] = [];
 
@@ -2724,6 +2950,31 @@ export namespace SystemVerilogParser {
                     symbols = symbols.concat(topSymbols);
                 }
             }
+
+            return symbols;
+        } catch(error) {
+            ConnectionLogger.error(error);
+            return [];
+        }
+    }
+
+    export function fileContainers(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[]): SystemVerilogContainersInfo {
+        try {
+            if ((fileSymbolsInfo.length > FileInfoIndex.Containers) &&
+                (fileSymbolsInfo[FileInfoIndex.Containers] != undefined) &&
+                (fileSymbolsInfo[FileInfoIndex.Containers].length > 0)) {
+                return <SystemVerilogContainersInfo>(fileSymbolsInfo[FileInfoIndex.Containers]);
+            }
+            return [];
+        } catch(error) {
+            ConnectionLogger.error(error);
+            return [];
+        }
+    }
+
+    export function fileAllSymbols(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[], strict: Boolean = true): SystemVerilogSymbol[] {
+        try {
+            let symbols: SystemVerilogSymbol[] = fileTopSymbols(fileSymbolsInfo, strict);
 
             if ((fileSymbolsInfo.length > FileInfoIndex.Containers) &&
                 (fileSymbolsInfo[FileInfoIndex.Containers] != undefined) &&
@@ -2746,20 +2997,49 @@ export namespace SystemVerilogParser {
         }
     }
 
-    export function containerSymbols(containerSymbolsInfo: SystemVerilogContainerSymbolsInfo[]): SystemVerilogSymbol[] {
+    export function containerAllContainers(containerSymbolsInfo: SystemVerilogContainerSymbolsInfo[]): SystemVerilogSymbol[] {
         try {
             let symbols: SystemVerilogSymbol[] = [];
 
             if ((containerSymbolsInfo.length > ContainerInfoIndex.Containers) &&
                 (containerSymbolsInfo[ContainerInfoIndex.Containers] != undefined)) {
                 for (let container of <SystemVerilogContainersInfo>(containerSymbolsInfo[ContainerInfoIndex.Containers])) {
-                    if (!container[0].name.startsWith('#')) {
-                        symbols.push(container[0]);
+                    if (!container[0][0].name.startsWith('#')) {
+                        symbols.push(container[0][0]);
                     }
-                    symbols = symbols.concat(containerSymbols(container[1]));
+                    symbols = symbols.concat(containerAllContainers(container[1]));
                 }
             }
 
+            return symbols;
+        } catch(error) {
+            ConnectionLogger.error(error);
+            return [];
+        }
+    }
+
+    export function containerContainers(containerInfo: SystemVerilogContainerInfo): SystemVerilogContainersInfo {
+        try {
+            if ((containerInfo[1].length > ContainerInfoIndex.Containers) &&
+                (containerInfo[1][ContainerInfoIndex.Containers] != undefined) &&
+                (containerInfo[1][ContainerInfoIndex.Containers].length > 0)) {
+                return <SystemVerilogContainersInfo>(containerInfo[1][ContainerInfoIndex.Containers]);
+            }
+            return [];
+        } catch(error) {
+            ConnectionLogger.error(error);
+            return [];
+        }
+    }
+
+    export function containerTopSymbols(containerInfo: SystemVerilogContainerInfo): SystemVerilogSymbol[] {
+        try {
+            let symbols: SystemVerilogSymbol[] = [containerInfo[0][0]];
+            if ((containerInfo[1].length > ContainerInfoIndex.Symbols) &&
+                (containerInfo[1][ContainerInfoIndex.Symbols] != undefined) &&
+                (containerInfo[1][ContainerInfoIndex.Symbols].length > 0)) {
+                symbols = symbols.concat(<SystemVerilogSymbolsInfo>(containerInfo[1][ContainerInfoIndex.Symbols]));
+            }
             return symbols;
         } catch(error) {
             ConnectionLogger.error(error);
@@ -2771,8 +3051,8 @@ export namespace SystemVerilogParser {
         try {
             let symbols: SystemVerilogSymbol[] = [];
 
-            if (!containerInfo[0].name.startsWith('#') && !topOnly) {
-                symbols.push(containerInfo[0]);
+            if (!containerInfo[0][0].name.startsWith('#') && !topOnly) {
+                symbols.push(containerInfo[0][0]);
             }
 
             if ((containerInfo[1].length > ContainerInfoIndex.Symbols) &&
@@ -2787,7 +3067,7 @@ export namespace SystemVerilogParser {
                 (containerInfo[1][ContainerInfoIndex.Containers].length > 0)) {
                 for (let childContainerInfo of <SystemVerilogContainersInfo>(containerInfo[1][ContainerInfoIndex.Containers])) {
                     if (topOnly) {
-                        symbols.push(childContainerInfo[0]);
+                        symbols.push(childContainerInfo[0][0]);
                     }
                     else {
                         symbols = symbols.concat(containerAllSymbols(childContainerInfo));
@@ -2802,17 +3082,17 @@ export namespace SystemVerilogParser {
         }
     }
 
-    export function fileContainerSymbols(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[]): SystemVerilogSymbol[] {
+    export function fileAllContainers(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[]): SystemVerilogSymbol[] {
         try {
             let symbols: SystemVerilogSymbol[] = [];
 
             if ((fileSymbolsInfo.length > FileInfoIndex.Containers) &&
                 (fileSymbolsInfo[FileInfoIndex.Containers] != undefined)) {
                 for (let container of <SystemVerilogContainersInfo>(fileSymbolsInfo[FileInfoIndex.Containers])) {
-                    if (!container[0].name.startsWith('#')) {
-                        symbols.push(container[0]);
+                    if (!container[0][0].name.startsWith('#')) {
+                        symbols.push(container[0][0]);
                     }
-                    symbols = symbols.concat(containerSymbols(container[1]));
+                    symbols = symbols.concat(containerAllContainers(container[1]));
                 }
             }
 
@@ -2820,6 +3100,19 @@ export namespace SystemVerilogParser {
         } catch(error) {
             ConnectionLogger.error(error);
             return [];
+        }
+    }
+
+    export function findFileContainer(fileSymbolsInfo: SystemVerilogFileSymbolsInfo[], cntnrName: string): SystemVerilogContainerInfo {
+        try {
+            if ((fileSymbolsInfo.length > FileInfoIndex.Containers) &&
+                (fileSymbolsInfo[FileInfoIndex.Containers] != undefined)) {
+                return (<SystemVerilogContainersInfo>(fileSymbolsInfo[FileInfoIndex.Containers])).find(cntnr => { return cntnr[0][0].name == cntnrName; });
+            }
+            return undefined;
+        } catch(error) {
+            ConnectionLogger.error(error);
+            return undefined;
         }
     }
 
@@ -2837,18 +3130,18 @@ export namespace SystemVerilogParser {
             if ((containerSymbolsInfo.length > ContainerInfoIndex.Containers) &&
                 (containerSymbolsInfo[ContainerInfoIndex.Containers] != undefined)) {
                 for (let container of <SystemVerilogContainersInfo>(containerSymbolsInfo[ContainerInfoIndex.Containers])) {
-                    if (container[0].name == symbolName) {
+                    if (container[0][0].name == symbolName) {
                         if (findContainer) {
                             return container;
                         }
                         else {
-                            return container[0];
+                            return container[0][0];
                         }
                     }
 
                     if (findContainer) {
                         let subContainerInfo: SystemVerilogContainerInfo = <SystemVerilogContainerInfo>(findContainerSymbol(container[1], symbolName, findContainer));
-                        if (subContainerInfo[0] != undefined) {
+                        if (subContainerInfo[0][0] != undefined) {
                             return subContainerInfo;
                         }
                     }
@@ -2862,7 +3155,7 @@ export namespace SystemVerilogParser {
             }
 
             if (findContainer) {
-                return [undefined, []];
+                return [[undefined, undefined], []];
             }
             else {
                 return undefined;
@@ -2870,6 +3163,20 @@ export namespace SystemVerilogParser {
         } catch(error) {
             ConnectionLogger.error(error);
             return undefined;
+        }
+    }
+
+    export function getInstSymbolsInContainer(containerSymbolsInfo: SystemVerilogContainerSymbolsInfo[]): SystemVerilogSymbol[] {
+        try {
+            let instSymbols: SystemVerilogSymbol[] = [];
+            if ((containerSymbolsInfo.length > ContainerInfoIndex.Symbols) &&
+                (containerSymbolsInfo[ContainerInfoIndex.Symbols] != undefined)) {
+                instSymbols = (<SystemVerilogSymbol[]>(containerSymbolsInfo[ContainerInfoIndex.Symbols])).filter(sym => sym.type[0] == "instance");
+            }
+            return instSymbols;
+        } catch(error) {
+            ConnectionLogger.error(error);
+            return [];
         }
     }
 
@@ -2887,18 +3194,18 @@ export namespace SystemVerilogParser {
             if ((fileSymbolsInfo.length > FileInfoIndex.Containers) &&
                 (fileSymbolsInfo[FileInfoIndex.Containers] != undefined)) {
                 for (let container of <SystemVerilogContainersInfo>(fileSymbolsInfo[FileInfoIndex.Containers])) {
-                    if (container[0].name == symbolName) {
+                    if (container[0][0].name == symbolName) {
                         if (findContainer) {
                             return container;
                         }
                         else {
-                            return container[0];
+                            return container[0][0];
                         }
                     }
 
                     if (findContainer) {
                         let subContainerInfo: SystemVerilogContainerInfo = <SystemVerilogContainerInfo>(findContainerSymbol(container[1], symbolName, findContainer));
-                        if (subContainerInfo[0] != undefined) {
+                        if (subContainerInfo[0][0] != undefined) {
                             return subContainerInfo;
                         }
                     }
@@ -2935,7 +3242,8 @@ export namespace SystemVerilogParser {
                 else {
                     for (let jsonContainerInfo of jsonFileSymbolsInfo[FileInfoIndex.Containers]) {
                         (<SystemVerilogContainersInfo>fileSymbolsInfo[FileInfoIndex.Containers]).push([
-                            SystemVerilogSymbol.fromJSON(file, <SystemVerilogSymbolJSON>(jsonContainerInfo[0])),
+                            [SystemVerilogSymbol.fromJSON(file, <SystemVerilogSymbolJSON>(jsonContainerInfo[0][0])),
+                             <SystemVerilogPositionJSON>(jsonContainerInfo[0][1])],
                             _jsonToContainerSymbolsInfo(file, <SystemVerilogContainerSymbolsInfoJSON[]>(jsonContainerInfo[1]))
                         ]);
                     }
@@ -2991,7 +3299,7 @@ export namespace SystemVerilogParser {
         }
     }
 
-    export function containerImports(containerSymbolsInfo: SystemVerilogContainerSymbolsInfo[]): SystemVerilogImportsInfo {
+    export function containerImports(containerSymbolsInfo: SystemVerilogContainerSymbolsInfo[], topOnly: boolean = false): SystemVerilogImportsInfo {
         try {
             let containerImportsInfo: SystemVerilogImportsInfo = [];
 
@@ -3000,7 +3308,7 @@ export namespace SystemVerilogParser {
                 containerImportsInfo = <SystemVerilogImportsInfo>(containerSymbolsInfo[ContainerInfoIndex.Imports]);
             }
 
-            if ((containerSymbolsInfo.length > ContainerInfoIndex.Containers) &&
+            if (!topOnly && (containerSymbolsInfo.length > ContainerInfoIndex.Containers) &&
                 (containerSymbolsInfo[ContainerInfoIndex.Containers] != undefined)) {
                 for (let cntnrInfo of <SystemVerilogContainersInfo>(containerSymbolsInfo[ContainerInfoIndex.Containers])) {
                     containerImportsInfo = containerImportsInfo.concat(containerImports(cntnrInfo[1]));
