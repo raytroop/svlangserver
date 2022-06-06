@@ -724,6 +724,7 @@ const sv_completion_keywords: string[][] = [
     ["uvm_severity"],
     ["uvm_shutdown_phase"],
     ["uvm_test"],
+    ["uvm_comparer"],
     ["uvm_text_tr_database"],
     ["uvm_tlm_analysis_fifo"],
     ["uvm_tlm_extension"],
