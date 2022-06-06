@@ -101,17 +101,21 @@ connection.onInitialize((params: InitializeParams) => {
 
     try {
         svindexer.setRoot(uriToPath(params.rootUri));
-        if (clientName.startsWith("vscode")) {
+        if ((clientName.toLowerCase().startsWith("vscode")) ||
+            (clientName.toLowerCase().startsWith("visual studio code"))) {
             svindexer.setClientDir(".vscode");
         }
-        else if (clientName.startsWith("coc.nvim")) {
+        else if (clientName.toLowerCase().startsWith("coc.nvim")) {
             svindexer.setClientDir(".vim");
         }
-        else if (clientName.startsWith("Sublime")) {
+        else if (clientName.toLowerCase().startsWith("sublime")) {
             svindexer.setClientDir(".sublime");
         }
-        else if (clientName.startsWith("emacs")) {
+        else if (clientName.toLowerCase().startsWith("emacs")) {
             svindexer.setClientDir(".emacs");
+        }
+        else if (clientName.toLowerCase().startsWith("neovim")) {
+            svindexer.setClientDir(".nvim");
         }
         else {
             svindexer.setClientDir(".svlangserver");
@@ -186,7 +190,8 @@ function getSettings() : Promise<Object> {
     }
 }
 
-function updateSettings(change, forceUpdate: Boolean = false) {
+let settingsInitialized: Boolean = false;
+function updateSettings(change, updateIfNotInitialized: Boolean = false) {
     let oldSettings: Map<string, any> = new Map<string, any>();
     for (let [prop, val] of settings.entries()) {
         oldSettings.set(prop, val);
@@ -209,22 +214,30 @@ function updateSettings(change, forceUpdate: Boolean = false) {
         ConnectionLogger.log(`INFO: settings[${prop}] = ${settings.get(prop)}`);
     }
 
+    let forceUpdate: Boolean = !settingsInitialized && updateIfNotInitialized;
     let definesChanged: Boolean = forceUpdate || !isStringListEqual(oldSettings.get("systemverilog.defines"), settings.get("systemverilog.defines"))
     if (forceUpdate || definesChanged ||
         !isStringListEqual(oldSettings.get("systemverilog.includeIndexing"), settings.get("systemverilog.includeIndexing")) ||
-        !isStringListEqual(oldSettings.get("systemverilog.libraryIndexing"), settings.get("systemverilog.libraryIndexing")) ||
+        !isStringListEqual(oldSettings.get("systemverilog.mustIncludeIndexing"), settings.get("systemverilog.mustIncludeIndexing")) ||
         !isStringListEqual(oldSettings.get("systemverilog.excludeIndexing"), settings.get("systemverilog.excludeIndexing"))) {
         if (definesChanged) {
             svindexer.setDefines(settings.get("systemverilog.defines"));
         }
+        svindexer.index(settings.get("systemverilog.includeIndexing"), settings.get("systemverilog.mustIncludeIndexing"), settings.get("systemverilog.excludeIndexing"));
+    }
+
+    if (forceUpdate ||
+        !isStringListEqual(oldSettings.get("systemverilog.libraryIndexing"), settings.get("systemverilog.libraryIndexing"))) {
         svindexer.setLibraries(settings.get("systemverilog.libraryIndexing"), settings.get("systemverilog.excludeIndexing"));
-        svindexer.index(settings.get("systemverilog.includeIndexing"), settings.get("systemverilog.excludeIndexing"));
     }
 
     diagnostics.setLinter(settings.get("systemverilog.linter"));
     diagnostics.setCommand(settings.get("systemverilog.launchConfiguration"));
     diagnostics.setDefines(settings.get("systemverilog.defines"));
+    diagnostics.setWhitelistedMessages(settings.get("systemverilog.linterWhitelist"));
+
     svformatter.setCommand(settings.get("systemverilog.formatCommand"));
+    settingsInitialized = true;
 }
 
 connection.onInitialized(() => {
@@ -376,8 +389,7 @@ connection.onSignatureHelp((textDocumentPosition: TextDocumentPositionParams): S
 connection.onExecuteCommand((commandParams) => {
     try {
         if (commandParams.command == BuildIndexCommand) {
-            svindexer.setLibraries(settings.get("systemverilog.libraryIndexing"), settings.get("systemverilog.excludeIndexing"));
-            svindexer.index(settings.get("systemverilog.includeIndexing"), settings.get("systemverilog.excludeIndexing"));
+            svindexer.index(settings.get("systemverilog.includeIndexing"), settings.get("systemverilog.mustIncludeIndexing"), settings.get("systemverilog.excludeIndexing"));
         }
         else if (commandParams.command == ReportHierarchyCommand) {
             if ((commandParams.arguments == undefined) || (commandParams.arguments.length != 1)) {
