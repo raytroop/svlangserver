@@ -155,10 +155,6 @@ function parseIcarusDiagnostics (stdout: string, stderr: string, file: string, w
 }
 
 export class VerilogDiagnostics {
-    private static readonly _whitelistedMessages: RegExp[] = [
-        /Unsupported: Interfaced port on top level module/i
-    ];
-
     private _indexer: SystemVerilogIndexer;
     private _linter: 'icarus' | 'verilator' = 'icarus';
     private _command: string = "";
@@ -166,6 +162,7 @@ export class VerilogDiagnostics {
     private _optionsFile: string = "";
     private _childProcMngr: ChildProcManager = new ChildProcManager();
     private _delayedCaller: DelayedCaller = new DelayedCaller();
+    private _whitelistedMessages: RegExp[] = [];
 
     constructor(indexer: SystemVerilogIndexer) {
         this._indexer = indexer;
@@ -181,6 +178,10 @@ export class VerilogDiagnostics {
 
     public setOptionsFile(file: string) {
         this._optionsFile = file;
+    }
+
+    public setWhitelistedMessages(msgs: string[]) {
+        this._whitelistedMessages = msgs.map(m => new RegExp(m));
     }
 
     public setDefines(defines: string[]) {
@@ -202,7 +203,7 @@ export class VerilogDiagnostics {
 
                 if (this._indexer.fileHasPkg(file)) {
                     let vcFileContent: string = this._indexer.getOptionsFileContent()
-                                                                .map(line => { return (line == file) ? actFile : line; })
+                                                                .map(line => { return (line.endsWith(file)) ? line.slice(0, line.length - file.length) + actFile : line; })
                                                                 .join('\n');
                     vcTmpFileNum = tmpFileManager.getFreeTmpFileNum("vcfiles");
                     let tmpVcFile: string = tmpFileManager.getTmpFilePath("vcfiles", `lint${vcTmpFileNum}.vc`);
@@ -216,7 +217,7 @@ export class VerilogDiagnostics {
 
             let definesArg: string = this._defines.length > 0 ? this._defines.map(d => ` +define+${d}`).join('') : "";
             let optionsFileArg: string = optionsFile ? ' -f ' + optionsFile : "";
-            let actFileArg: string = " " + actFile;
+            let actFileArg: string = this._indexer.isMustSrcFile(file) ? "" : " " + actFile;
             let command: string = this._command + definesArg + optionsFileArg + actFileArg;
             //ConnectionLogger.log(`DEBUG: verilator command ${command}`);
             this._childProcMngr.run(file, command, (status, error, stdout, stderr) => {
@@ -226,10 +227,10 @@ export class VerilogDiagnostics {
                 if (status) {
                     switch (this._linter) {
                         case "icarus":
-                            resolve(parseIcarusDiagnostics(stdout, stderr, actFile, VerilogDiagnostics._whitelistedMessages));
+                            resolve(parseIcarusDiagnostics(stdout, stderr, actFile, this._whitelistedMessages));
                             break;
                         case "verilator":
-                            resolve(parseVerilatorDiagnostics(stdout, stderr, actFile, VerilogDiagnostics._whitelistedMessages));
+                            resolve(parseVerilatorDiagnostics(stdout, stderr, actFile, this._whitelistedMessages));
                             break;
                         default:
                             reject(new Error(`Unknown linter ${this._linter}`));

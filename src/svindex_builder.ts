@@ -8,7 +8,7 @@ import {
 
 import {
     MacroInfo,
-    PreprocIncInfo
+    PreprocCacheEntry
 } from './svpreprocessor';
 
 import {
@@ -23,7 +23,7 @@ import {
 
 let _parser: SystemVerilogParser = new SystemVerilogParser();
 
-let _includeCache: Map<string, [string, PreprocIncInfo, TextDocument]> = new Map();
+let _preprocCache: Map<string, PreprocCacheEntry> = new Map();
 let _includeFilePaths: string[] = [];
 let _userDefinesMacroInfo: Map<string, MacroInfo> = new Map();
 
@@ -39,24 +39,24 @@ process.on('message', (args) => {
             }
         }
         else if (args[0] == 'done') {
-            let includeCache = SystemVerilogParser.includeCacheToJSON(_includeCache);
-            process.send([includeCache, []]);
+            let preprocCache = SystemVerilogParser.preprocCacheToJSON(_preprocCache);
+            process.send([preprocCache, []]);
         }
         else {
             let file: string = args[1];
-            if (_includeCache.has(file)) {
+            if (_preprocCache.has(file)) {
                 process.send([[], []]);
             }
             else {
                 fsReadFile(file)
                     .then((data) => {
                         let document: TextDocument = TextDocument.create(pathToUri(file), "SystemVerilog", 0, data.toString());
-                        let fileSymbolsInfo: SystemVerilogParser.SystemVerilogFileSymbolsInfo[];
+                        let fileSymbolsInfo: SystemVerilogParser.SystemVerilogFileSymbolsInfo;
                         let pkgdeps: string[];
-                        [fileSymbolsInfo, pkgdeps] = _parser.parse(document, _includeFilePaths, _includeCache, _userDefinesMacroInfo, "full");
+                        [fileSymbolsInfo, pkgdeps] = _parser.parse(document, _includeFilePaths, _preprocCache, _userDefinesMacroInfo, "full");
                         //DBG let symbols: SystemVerilogSymbol[] = SystemVerilogParser.fileAllSymbols(fileSymbolsInfo, false);
                         //DBG ConnectionLogger.log(`DEBUG: Sending ${symbols.length} symbols and ${pkgdeps.length} pkgdeps for ${file}`);
-                        process.send([fileSymbolsInfo, pkgdeps]);
+                        process.send([SystemVerilogParser.fileSymbolsInfoToJson(fileSymbolsInfo), pkgdeps]);
                     })
                     .catch((err) => {
                         process.send([[], []]);
