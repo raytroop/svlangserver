@@ -95,9 +95,9 @@ let svhiercalculator: SystemVerilogHierarchyCalculator = new SystemVerilogHierar
 let settings = default_settings;
 
 connection.onInitialize((params: InitializeParams) => {
-    hasConfigurationCapability = !!(params.capabilities.workspace && !!params.capabilities.workspace.configuration);
-    hasShowWindowCapability = !!(params.capabilities.window && params.capabilities.window.showDocument);
-    clientName = !!params.clientInfo ? params.clientInfo.name : undefined;
+    hasConfigurationCapability = params.capabilities.workspace?.configuration == true;
+    hasShowWindowCapability = params.capabilities.window?.showDocument?.support == true;
+    clientName = params.clientInfo?.name;
 
     try {
         svindexer.setRoot(uriToPath(params.rootUri));
@@ -113,9 +113,6 @@ connection.onInitialize((params: InitializeParams) => {
         }
         else if (clientName.toLowerCase().startsWith("emacs")) {
             svindexer.setClientDir(".emacs");
-        }
-        else if (clientName.toLowerCase().startsWith("neovim")) {
-            svindexer.setClientDir(".nvim");
         }
         else {
             svindexer.setClientDir(".svlangserver");
