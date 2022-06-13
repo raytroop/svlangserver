@@ -30,6 +30,14 @@ import {
 } from './genutils';
 
 const sv_completion_systemtask: string[][] = [
+	// FSDB
+    ["fsdbDumpfile", "$fsdbDumpfile", "fsdbDumpfile"],
+    ["fsdbSuppress", "$fsdbSuppress", "fsdbSuppress"],
+    ["fsdbAutoSwitchDumpfile", "$fsdbAutoSwitchDumpfile", "fsdbAutoSwitchDumpfile"],
+    ["fsdbDumpvars", "$fsdbDumpvars", "fsdbDumpvars"],
+    ["fsdbDumpon", "$fsdbDumpon", "fsdbDumpon"],
+    ["fsdbDumpoff", "$fsdbDumpoff", "fsdbDumpoff"],
+    ["fsdbDumpFinish", "$fsdbDumpFinish", "fsdbDumpFinish"],
     // Compilation units
     ["unit", "$unit::variable_name", "unit::${1:variable_name}"],
     // Module instances (hierarchy)
